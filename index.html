@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Escaneo 3D · Gaussian Splatting</title>
+  <meta name="description" content="Entorno 6DOF capturado con Scaniverse y montado en la web con Spark (World Labs). Compatible con VR.">
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --panel: rgba(16, 18, 22, 0.84);
+      --text: #e9ecef;
+      --muted: #9aa3ad;
+      --accent: #7cc4ff;
+      --line: rgba(255, 255, 255, 0.12);
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    canvas { display: block; touch-action: none; }
+
+    /* Pantalla de carga */
+    #loader {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      transition: opacity 0.6s;
+    }
+    #loader.done { opacity: 0; pointer-events: none; }
+    .load-box { width: min(320px, calc(100vw - 32px)); text-align: center; }
+    .load-box strong { display: block; font-size: 16px; }
+    #load-status { color: var(--muted); font-size: 13px; }
+    .bar { height: 4px; margin-top: 14px; border-radius: 2px; overflow: hidden; background: var(--line); }
+    .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+
+    /* Panel plegable con la descripción del entregable */
+    #info {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 5;
+      width: min(360px, calc(100vw - 32px));
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    #info summary {
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    #info summary::-webkit-details-marker { display: none; }
+    #info summary::after { content: "+"; float: right; color: var(--muted); font-weight: 400; }
+    #info[open] summary::after { content: "−"; }
+    #info .body {
+      max-height: calc(100vh - 150px);
+      overflow: auto;
+      padding: 0 14px 14px;
+      border-top: 1px solid var(--line);
+    }
+    #info h3 {
+      margin: 14px 0 4px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    #info p, #info ul { margin: 0; }
+    #info ul { padding-left: 18px; }
+    #info kbd {
+      padding: 0 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font: 12px ui-monospace, Menlo, monospace;
+    }
+    .muted { color: var(--muted); }
+
+    /* Aviso cuando el navegador no tiene WebXR */
+    #novr {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      z-index: 5;
+      transform: translateX(-50%);
+      max-width: calc(100vw - 32px);
+      padding: 8px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+        "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.3.1/dist/spark.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="loader">
+    <div class="load-box">
+      <strong>Cargando escaneo…</strong>
+      <span id="load-status">Descargando scan.ply</span>
+      <div class="bar"><i id="load-bar"></i></div>
+    </div>
+  </div>
+
+  <details id="info" open>
+    <summary>Acerca del proyecto</summary>
+    <div class="body">
+      <h3>Captura</h3>
+      <p>Entorno interior capturado en 6DOF con la técnica de Gaussian Splatting.</p>
+
+      <h3>App utilizada</h3>
+      <!-- EDITAR: explica por qué elegiste Scaniverse frente a las otras apps que probaste -->
+      <p><strong>Scaniverse.</strong> La elegí porque procesa el escaneo en el mismo teléfono, exporta directamente a <code>.ply</code> y fue la que dio el resultado más nítido de las apps que probé.</p>
+
+      <h3>Plataforma de montaje</h3>
+      <p>Web con <strong>Spark</strong> (World Labs) sobre three.js, publicada en GitHub Pages. El modo VR usa WebXR y funciona en el navegador del Meta Quest.</p>
+
+      <h3>Dificultades</h3>
+      <!-- EDITAR: describe las dificultades reales que tuviste al escanear -->
+      <ul>
+        <li>Mantener la iluminación uniforme durante toda la captura.</li>
+        <li>Cubrir esquinas, techo y piso a distintas alturas sin dejar huecos.</li>
+        <li>Superficies reflejantes y ventanas que generan ruido en la reconstrucción.</li>
+      </ul>
+
+      <h3>Controles</h3>
+      <ul>
+        <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> o flechas para moverte; <kbd>E</kbd>/<kbd>Q</kbd> para subir y bajar.</li>
+        <li>Arrastra con el mouse (o el dedo) para mirar alrededor.</li>
+        <li>En VR: stick izquierdo para avanzar y stick derecho para girar.</li>
+      </ul>
+
+      <h3>Créditos</h3>
+      <!-- EDITAR: agrega a tu compañero(a) si trabajaron en pareja -->
+      <p>Claudio C.</p>
+      <p class="muted">Visualización y realidad virtual · Gaussian Splatting</p>
+    </div>
+  </details>
+
+  <div id="novr" hidden>Para verlo en VR, abre esta página en el navegador del Meta Quest.</div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { SparkRenderer, SplatMesh, SparkControls, SparkXr } from "@sparkjsdev/spark";
+
+    // Altura del piso en el .ply original: Scaniverse exporta con el eje Y hacia abajo
+    const FLOOR_Y = 0.7;
+    // Vista inicial: de pie detrás de la silla mirando al escritorio (metros, piso en y = 0)
+    const START_POSITION = new THREE.Vector3(0.6, 1.4, 1.0);
+    const START_ROTATION = new THREE.Euler(THREE.MathUtils.degToRad(-15), THREE.MathUtils.degToRad(30), 0, "YXZ");
+
+    // En pantallas angostas el panel empieza cerrado para no tapar la escena
+    if (window.innerWidth < 700) document.getElementById("info").open = false;
+
+    const loader = document.getElementById("loader");
+    const loadStatus = document.getElementById("load-status");
+    const loadBar = document.getElementById("load-bar");
+
+    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+    camera.position.copy(START_POSITION);
+    camera.rotation.copy(START_ROTATION);
+
+    // En VR, SparkXr mueve el padre de la cámara con los joysticks
+    const rig = new THREE.Group();
+    rig.add(camera);
+    scene.add(rig);
+
+    const spark = new SparkRenderer({ renderer });
+    scene.add(spark);
+
+    const splat = new SplatMesh({
+      url: "./scan.ply",
+      onProgress: (event) => {
+        const mb = (event.loaded / 1e6).toFixed(1);
+        if (event.lengthComputable) {
+          const pct = Math.round((event.loaded / event.total) * 100);
+          loadBar.style.width = `${pct}%`;
+          loadStatus.textContent = `${mb} de ${(event.total / 1e6).toFixed(1)} MB (${pct}%)`;
+        } else {
+          loadStatus.textContent = `${mb} MB descargados`;
+        }
+      },
+    });
+    // Giro de 180° en X para pasar a Y hacia arriba y subir el piso a y = 0
+    splat.quaternion.set(1, 0, 0, 0);
+    splat.position.y = FLOOR_Y;
+    scene.add(splat);
+
+    splat.initialized
+      .then(() => {
+        loadBar.style.width = "100%";
+        loader.classList.add("done");
+      })
+      .catch((error) => {
+        console.error(error);
+        loadStatus.textContent = location.protocol === "file:"
+          ? "No se pudo cargar scan.ply: abre la página desde un servidor web, no como archivo local."
+          : "No se pudo cargar scan.ply. Revisa que el archivo esté junto a index.html.";
+      });
+
+    const controls = new SparkControls({ canvas: renderer.domElement });
+
+    // Pose de la cámara 2D para restaurarla al salir de VR
+    const savedPose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+
+    const xr = new SparkXr({
+      renderer,
+      mode: "vr",
+      referenceSpaceType: "local-floor",
+      controllers: { moveSpeed: 1, moveDirection: true },
+      onReady: (supported) => {
+        document.getElementById("novr").hidden = supported;
+      },
+      onEnterXr: () => {
+        // Empieza en VR parado donde estaba la cámara 2D, mirando hacia el mismo lado
+        savedPose.position.copy(camera.position);
+        savedPose.quaternion.copy(camera.quaternion);
+        const yaw = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ").y;
+        rig.position.set(camera.position.x, 0, camera.position.z);
+        rig.rotation.set(0, yaw, 0);
+      },
+      onExitXr: () => {
+        rig.position.set(0, 0, 0);
+        rig.rotation.set(0, 0, 0);
+        camera.position.copy(savedPose.position);
+        camera.quaternion.copy(savedPose.quaternion);
+        onResize();
+      },
+    });
+
+    function onResize() {
+      camera.fov = 70;
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener("resize", onResize);
+
+    renderer.setAnimationLoop(() => {
+      if (renderer.xr.isPresenting) {
+        xr.updateControllers(camera);
+      } else {
+        controls.update(camera);
+      }
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
